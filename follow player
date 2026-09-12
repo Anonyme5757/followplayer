@@ -1,0 +1,223 @@
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+
+local localPlayer = Players.LocalPlayer
+local isFollowing = false
+local targetPlayer = nil
+local connection = nil
+
+-- ===== RÉGLAGES =====
+local currentOffset = 0          -- Valeur de départ (0 = collé)
+local maxOffset = 12             -- Distance max du slider
+-- ====================
+
+-- GUI
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "FollowGUI"
+screenGui.ResetOnSpawn = false
+screenGui.Parent = localPlayer:WaitForChild("PlayerGui")
+
+local frame = Instance.new("Frame")
+frame.Size = UDim2.new(0, 240, 0, 160)
+frame.Position = UDim2.new(0.5, -120, 0, 20)
+frame.AnchorPoint = Vector2.new(0.5, 0)
+frame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+frame.BorderSizePixel = 0
+frame.Parent = screenGui
+
+local title = Instance.new("TextLabel")
+title.Size = UDim2.new(1, 0, 0, 26)
+title.BackgroundTransparency = 1
+title.Text = "Suivi Instantané + Saut"
+title.TextColor3 = Color3.fromRGB(255, 255, 255)
+title.TextSize = 14
+title.Font = Enum.Font.GothamBold
+title.Parent = frame
+
+local textBox = Instance.new("TextBox")
+textBox.Size = UDim2.new(1, -16, 0, 30)
+textBox.Position = UDim2.new(0, 8, 0, 30)
+textBox.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+textBox.TextColor3 = Color3.fromRGB(255, 255, 255)
+textBox.PlaceholderText = "Pseudo du joueur..."
+textBox.TextSize = 13
+textBox.Font = Enum.Font.Gotham
+textBox.Parent = frame
+
+-- ===== SLIDER =====
+local sliderLabel = Instance.new("TextLabel")
+sliderLabel.Size = UDim2.new(1, -16, 0, 20)
+sliderLabel.Position = UDim2.new(0, 8, 0, 68)
+sliderLabel.BackgroundTransparency = 1
+sliderLabel.Text = "Décalage : 0"
+sliderLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+sliderLabel.TextSize = 12
+sliderLabel.Font = Enum.Font.Gotham
+sliderLabel.TextXAlignment = Enum.TextXAlignment.Left
+sliderLabel.Parent = frame
+
+local sliderBack = Instance.new("Frame")
+sliderBack.Size = UDim2.new(1, -16, 0, 8)
+sliderBack.Position = UDim2.new(0, 8, 0, 92)
+sliderBack.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+sliderBack.BorderSizePixel = 0
+sliderBack.Parent = frame
+
+local sliderFill = Instance.new("Frame")
+sliderFill.Size = UDim2.new(0, 0, 1, 0)
+sliderFill.BackgroundColor3 = Color3.fromRGB(0, 140, 255)
+sliderFill.BorderSizePixel = 0
+sliderFill.Parent = sliderBack
+
+local sliderButton = Instance.new("TextButton")
+sliderButton.Size = UDim2.new(0, 16, 0, 16)
+sliderButton.Position = UDim2.new(0, -8, 0.5, -8)
+sliderButton.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+sliderButton.Text = ""
+sliderButton.BorderSizePixel = 0
+sliderButton.AutoButtonColor = false
+sliderButton.Parent = sliderBack
+
+-- Arrondi du bouton
+local corner = Instance.new("UICorner")
+corner.CornerRadius = UDim.new(1, 0)
+corner.Parent = sliderButton
+
+local corner2 = Instance.new("UICorner")
+corner2.CornerRadius = UDim.new(0, 4)
+corner2.Parent = sliderBack
+
+-- ===== BOUTON SUIVRE =====
+local followButton = Instance.new("TextButton")
+followButton.Size = UDim2.new(1, -16, 0, 32)
+followButton.Position = UDim2.new(0, 8, 0, 116)
+followButton.BackgroundColor3 = Color3.fromRGB(0, 140, 255)
+followButton.Text = "Suivre"
+followButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+followButton.TextSize = 14
+followButton.Font = Enum.Font.GothamBold
+followButton.Parent = frame
+
+-- ===== LOGIQUE DU SLIDER =====
+local dragging = false
+
+local function updateSlider(value)
+	value = math.clamp(value, 0, maxOffset)
+	currentOffset = value
+
+	local percent = value / maxOffset
+	sliderFill.Size = UDim2.new(percent, 0, 1, 0)
+	sliderButton.Position = UDim2.new(percent, -8, 0.5, -8)
+	sliderLabel.Text = "Décalage : " .. string.format("%.1f", value)
+end
+
+sliderButton.MouseButton1Down:Connect(function()
+	dragging = true
+end)
+
+UserInputService.InputEnded:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+		dragging = false
+	end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+	if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+		local mousePos = UserInputService:GetMouseLocation()
+		local backPos = sliderBack.AbsolutePosition
+		local backSize = sliderBack.AbsoluteSize
+
+		local relative = (mousePos.X - backPos.X) / backSize.X
+		relative = math.clamp(relative, 0, 1)
+
+		updateSlider(relative * maxOffset)
+	end
+end)
+
+-- Initialise le slider à 0
+updateSlider(0)
+
+-- ===== FONCTIONS SUIVI =====
+local function stopFollowing()
+	isFollowing = false
+	targetPlayer = nil
+	if connection then
+		connection:Disconnect()
+		connection = nil
+	end
+	followButton.Text = "Suivre"
+	followButton.BackgroundColor3 = Color3.fromRGB(0, 140, 255)
+end
+
+local function startFollowing(name)
+	targetPlayer = nil
+	for _, plr in ipairs(Players:GetPlayers()) do
+		if plr ~= localPlayer and string.find(string.lower(plr.Name), string.lower(name), 1, true) == 1 then
+			targetPlayer = plr
+			break
+		end
+	end
+
+	if not targetPlayer then
+		warn("Joueur introuvable")
+		return false
+	end
+
+	isFollowing = true
+	followButton.Text = "Arrêter"
+	followButton.BackgroundColor3 = Color3.fromRGB(220, 40, 40)
+
+	connection = RunService.RenderStepped:Connect(function()
+		if not isFollowing or not targetPlayer then
+			stopFollowing()
+			return
+		end
+
+		local targetChar = targetPlayer.Character
+		local localChar = localPlayer.Character
+		if not targetChar or not localChar then return end
+
+		local targetRoot = targetChar:FindFirstChild("HumanoidRootPart")
+		local localRoot = localChar:FindFirstChild("HumanoidRootPart")
+		local targetHum = targetChar:FindFirstChildOfClass("Humanoid")
+		local localHum = localChar:FindFirstChildOfClass("Humanoid")
+
+		if not (targetRoot and localRoot and targetHum and localHum) then return end
+
+		-- Anti-siège
+		if localHum.Sit or localHum:GetState() == Enum.HumanoidStateType.Seated then
+			localHum.Sit = false
+		end
+
+		-- Suivi avec le décalage du slider
+		local offset = CFrame.new(0, 0, currentOffset)
+		localRoot.CFrame = targetRoot.CFrame * offset
+		localRoot.AssemblyLinearVelocity = targetRoot.AssemblyLinearVelocity
+
+		-- Saut automatique
+		local state = targetHum:GetState()
+		if state == Enum.HumanoidStateType.Jumping or state == Enum.HumanoidStateType.Freefall then
+			localHum.Jump = true
+		end
+	end)
+
+	return true
+end
+
+followButton.MouseButton1Click:Connect(function()
+	if isFollowing then
+		stopFollowing()
+	else
+		local name = textBox.Text
+		if name == "" then return end
+		startFollowing(name)
+	end
+end)
+
+UserInputService.InputBegan:Connect(function(input, gp)
+	if input.KeyCode == Enum.KeyCode.Escape then
+		stopFollowing()
+		screenGui:Destroy()
+	end
+end)
